@@ -1,117 +1,638 @@
 # TraceOps AI
 
-**Graph-powered incident investigation for AI agents, built with FalkorDB and a local LLM.**
+**Graph-powered incident investigation using FalkorDB, MCP, and a locally running LLM.**
 
-TraceOps AI helps engineers investigate service dependencies, discover related incidents, identify owning teams, find relevant runbooks, and understand potential impact through an interactive dependency graph and an AI-generated investigation report.
+TraceOps AI is an AI-assisted operational troubleshooting application that investigates services by traversing their dependencies and retrieving connected incidents, deployments, owning teams, and runbooks.
 
-The project uses **FalkorDB as its central graph database** and **Ollama to run the Qwen 2.5 3B language model locally**. The application retrieves operational evidence from the graph and uses the local model to explain that evidence.
+It uses FalkorDB as the primary graph database, a Model Context Protocol (MCP) server to expose graph investigation capabilities as tools, and Ollama with Qwen 2.5 3B for local language-model inference. A Flask backend orchestrates the investigation, while a React and TypeScript frontend displays the report and interactive service graph.
 
-## Table of Contents
+The system is designed to make incident investigation more explainable: graph queries supply the evidence, MCP makes investigation capabilities available as tools, and the LLM interprets the retrieved evidence rather than inventing operational facts.
 
-- [Problem Statement](#problem-statement)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Technology Stack](#technology-stack)
-- [Prerequisites](#prerequisites)
-- [Installation and Setup](#installation-and-setup)
-- [Running TraceOps AI](#running-traceops-ai)
-- [Testing the Application](#testing-the-application)
-- [Example Cypher Queries](#example-cypher-queries)
-- [API Reference](#api-reference)
-- [Troubleshooting](#troubleshooting)
-- [Limitations](#limitations)
+---
 
-## Problem Statement
+## 1. Hackathon Track
 
-Modern systems contain interconnected services, teams, incidents, deployments, and troubleshooting procedures. When a service encounters a problem, engineers need to understand which other services may be affected and where to investigate.
+### Track 1 — Agents That Act on Connected Data
 
-Searching through disconnected records can make this process slow and difficult.
+TraceOps AI is submitted under **Track 1: Agents That Act on Connected Data**.
 
-TraceOps AI represents these operational relationships as a graph. Engineers can investigate a service, traverse its dependencies, retrieve relevant incidents and runbooks, and view an evidence-based report in one interface.
+The project demonstrates how an AI-assisted agent can use connected operational data to investigate a service issue. Instead of treating services, incidents, teams, deployments, and runbooks as isolated records, it uses their relationships in FalkorDB to retrieve relevant evidence and identify potential impact.
 
-## Features
+For example, investigating `Payment API` can reveal:
 
-- **Graph-powered investigations:** Retrieve service relationships and operational records from FalkorDB.
-- **Dependency impact analysis:** Explore dependency paths and the number of hops between services.
-- **Incident context:** Identify related incidents, including their severity and status.
-- **Ownership discovery:** Find the team responsible for a service.
-- **Runbook recommendations:** Retrieve relevant troubleshooting instructions from the graph.
-- **Local AI interpretation:** Use Ollama with Qwen 2.5 3B to explain the retrieved evidence.
-- **Interactive dependency graph:** Explore nodes and relationships, search for services, filter node types, zoom, and inspect node properties.
-- **Evidence-grounded reporting:** Present findings, potential impact, investigation steps, and limitations.
-- **Local inference:** Run the language model on your own machine without sending prompts to an external LLM API provider.
+- Checkout depends on Payment API.
+- Order Management depends on Checkout, which depends on Payment API.
+- Payment Platform owns Payment API.
+- Incident INC-1045 is associated with Payment API.
+- Runbook RB-PAY-01 is associated with Payment API.
+- Deployment DEP-208 has a recorded relationship with an incident.
+
+The system uses graph traversal and relationship queries to connect these facts. The local LLM then helps explain the evidence and its limitations.
+
+The prototype focuses on investigation and evidence retrieval. It does not claim to perform autonomous production remediation.
+
+---
+
 
 ## Architecture
 
+TraceOps AI combines a local AI agent, MCP tools, and FalkorDB to investigate service dependencies, incidents, deployments, and troubleshooting runbooks.
+
+![TraceOps AI Architecture](docs/traceops-architecture.png)
+
+
+## 2. Problem Statement
+
+When a production service encounters an issue, engineers need to determine which services depend on it, which incidents may be relevant, who owns the service, which troubleshooting procedures apply, and whether recent deployments deserve investigation.
+
+These facts are often spread across different systems. Investigating them manually can be time-consuming, and an LLM operating without structured evidence may produce unsupported conclusions.
+
+TraceOps AI addresses this problem by representing operational information as a graph and querying the graph during investigations.
+
+The application combines:
+
+1. Graph-based retrieval from FalkorDB.
+2. MCP tools that expose investigation capabilities.
+3. Local LLM inference for evidence interpretation.
+4. Automated checks for dependency direction and unsupported causal claims.
+5. An interactive frontend for inspecting results.
+
+The result is an evidence-oriented investigation workflow that distinguishes potential impact and recorded correlations from confirmed outages or proven root causes.
+
+---
+
+## 3. Features
+
+- **Graph-powered investigation:** Retrieve connected operational facts from FalkorDB.
+- **Dependency impact analysis:** Discover dependent services and multi-hop dependency paths.
+- **Hop-count calculation:** Report the number of dependency edges in each path.
+- **Incident retrieval:** Identify associated incidents and their recorded severity and status.
+- **Ownership discovery:** Find the team responsible for a service.
+- **Runbook retrieval:** Identify relevant troubleshooting guidance.
+- **Deployment correlation:** Inspect recorded relationships between deployments and incidents.
+- **MCP tool integration:** Expose graph investigation operations as callable tools.
+- **Local LLM interpretation:** Use Ollama with Qwen 2.5 3B.
+- **Interactive service topology:** Explore nodes, relationships, and connected services.
+- **Evidence-grounded reports:** Present investigation findings and limitations.
+- **Validation tests:** Check dependency direction, causal-claim handling, service lookup, and deployment correlation.
+
+---
+
+## 4. Technology Stack
+
+| Component | Technology | Responsibility |
+
+| Graph database | FalkorDB | Stores operational entities and relationships |
+| Graph query language | Cypher | Traverses dependencies and retrieves connected evidence |
+| Agent-tool interface | Model Context Protocol (MCP) | Exposes graph investigation operations as tools |
+| LLM runtime | Ollama | Runs inference locally |
+| Language model | Qwen 2.5 3B | Interprets retrieved evidence |
+| Backend | Python and Flask | Serves API requests and coordinates investigations |
+| Frontend | React, TypeScript, Vite | Provides the investigation interface |
+| Graph visualization | Cytoscape.js | Displays and explores graph topology |
+| Configuration | python-dotenv | Loads environment configuration |
+| Testing | pytest and unittest-compatible tests | Validates investigation behavior |
+
+---
+
+## 5. Architecture
+
 ```text
-User
- |
- v
-React + TypeScript Frontend
- |                 |
- | Graph data      | Investigation request
- v                 v
-Interactive      Flask Backend
-Graph View           |
-                     v
-               Investigation Logic
-                     |
-                     v
-                FalkorDB Graph
-                     |
-                     v
-            Services, Dependencies,
-            Incidents, Teams, Runbooks
-                     |
-                     v
-               Local Ollama
-               Qwen 2.5 3B
-                     |
-                     v
-           Investigation Report
-                     |
-                     v
-             Frontend Results
+                     User
+                      |
+                      v
+          React + TypeScript Frontend
+                      |
+                      v
+                Flask Backend
+                      |
+                      v
+          Investigation Orchestration
+                      |
+             +--------+--------+
+             |                 |
+             v                 v
+       MCP Tool Calls     Local Ollama
+             |             Qwen 2.5 3B
+             v                 |
+       MCP Server              |
+             |                 |
+             v                 |
+       FalkorDB Graph           |
+             |                 |
+             v                 |
+    Cypher Queries and          |
+    Relationship Traversal      |
+             |                 |
+             +--------+--------+
+                      |
+                      v
+           Evidence-based Report
+                      |
+                      v
+              Frontend Results
 ```
 
-### How it works
+The diagram represents the logical workflow. MCP is the tool interface for graph operations, FalkorDB supplies the connected data, and Ollama provides local inference. The precise process and transport arrangement should match the current implementation.
 
-1. The user selects or enters a service, such as `Payment API`.
-2. The Flask backend validates the service against FalkorDB.
-3. Graph queries retrieve dependency paths, related incidents, owning teams, and runbooks.
-4. The local language model interprets the retrieved evidence.
-5. The application combines the graph-derived facts with the AI interpretation to produce an investigation report.
-6. The frontend displays the report and the interactive graph.
+### Investigation flow
 
-**Why FalkorDB matters:** The graph is not just a visualization. It stores and connects operational entities, and its relationships are queried to retrieve the evidence used in an investigation.
+1. The user enters a service name and investigation question.
+2. The backend validates the service against FalkorDB.
+3. The investigation logic invokes graph queries and available MCP tools.
+4. FalkorDB returns relevant service dependencies, incidents, owners, runbooks, and deployment relationships.
+5. The LLM receives the retrieved context to help formulate an explanation.
+6. The application validates selected report claims and presents the findings.
+7. The frontend displays the report and graph evidence.
 
-## Technology Stack
+### Why FalkorDB is central
 
-| Component | Technology | Purpose |
+FalkorDB is not just a visualization layer. It stores the entities and relationships used to answer investigation questions.
 
-| Frontend | React, TypeScript, Vite | Interactive web application |
-| Graph visualization | Cytoscape.js | Display and explore graph relationships |
-| Backend | Python, Flask, Flask-CORS | API and investigation workflow |
-| Graph database | FalkorDB | Store and query operational relationships |
-| Local LLM runtime | Ollama | Run inference locally |
-| Language model | Qwen 2.5 3B | Interpret graph evidence |
-| HTTP client | Python Requests | Communicate with Ollama |
-| Configuration | python-dotenv | Load environment configuration |
-| Testing | pytest | Support automated tests |
+The application depends on graph operations to:
 
-## Prerequisites
+- Traverse multi-hop dependency paths.
+- Determine which services may be affected by a dependency.
+- Connect services to their owning teams.
+- Retrieve related incidents and runbooks.
+- Inspect recorded deployment–incident relationships.
 
-Install the following before starting:
+Replacing FalkorDB with a simple list of disconnected records would remove the graph traversal and relationship queries that support these investigations.
+
+---
+
+## 6. Graph Data Model
+
+The sample graph represents services and the operational information needed to investigate them.
+
+### 6.1 Node labels
+
+The sample graph contains five node labels.
+
+| Label | Purpose | Important properties |
+|---|---|---|
+| `Service` | An application or operational service | `id`, `name`, `status` |
+| `Team` | The team responsible for a service | `name` |
+| `Incident` | A recorded operational incident | `id`, `title`, `severity`, `status` |
+| `Runbook` | Troubleshooting documentation | `id`, `title`, `instructions` |
+| `Deployment` | A recorded software deployment | `id`, `version`, `status`, `description` |
+
+These are the properties used by the sample queries and investigation behavior. Additional properties may exist in the actual graph.
+
+### 6.2 Relationship types
+
+| Relationship | Direction | Meaning |
+|---|---|---|
+| `DEPENDS_ON` | Service → Service | The source service depends on the target service |
+| `OWNED_BY` | Service → Team | The team responsible for a service |
+| `AFFECTED` | Incident → Service | The incident is recorded as affecting the service |
+| `HAS_RUNBOOK` | Service → Runbook | The service is associated with a runbook |
+| `DEPLOYED_TO` | Deployment → Service | The deployment is associated with the service |
+| `FOLLOWED_BY` | Deployment → Incident | The graph records that the incident followed the deployment |
+
+**Relationship direction is important.** For `DEPENDS_ON`, an edge from Checkout to Payment API means Checkout depends on Payment API. It does not mean Payment API depends on Checkout.
+
+Likewise, `FOLLOWED_BY` represents a recorded temporal association in this dataset. It does not prove that the deployment caused the incident.
+
+### 6.3 Sample graph topology
+
+```text
+Order Management
+       |
+   DEPENDS_ON
+       v
+    Checkout
+       |
+   DEPENDS_ON
+       v
+   Payment API
+       |
+       +------ OWNED_BY ------> Payment Platform
+       |
+       +------ HAS_RUNBOOK ---> RB-PAY-01
+
+INC-1045 ------ AFFECTED -----> Payment API
+
+DEP-208 ------- DEPLOYED_TO --> Payment API
+   |
+ FOLLOWED_BY
+   v
+Incident
+```
+
+The diagram is a simplified illustration of the sample graph. The actual relationships should be verified against the running database.
+
+### 6.4 Sample entities
+
+The current sample dataset includes the following entities:
+
+**Services**
+
+- Payment API — degraded
+- Checkout — healthy
+- Order Management — healthy
+- Auth Service — healthy
+- Notification Service — healthy
+
+**Teams**
+
+- Payment Platform
+- Commerce Engineering
+- Identity Platform
+
+**Incidents**
+
+- INC-1045 — Payment errors after deployment; high severity; investigating
+- INC-1032 — Authentication timeout; medium severity; resolved
+
+**Deployment**
+
+- DEP-208 — version 2.4.1; Payment API release
+
+**Runbooks**
+
+- RB-PAY-01
+- RB-AUTH-01
+
+These values are sample graph records, not a live production monitoring feed.
+
+### 6.5 Expected graph counts
+
+The populated sample graph was previously verified with:
+
+| Entity or relationship | Count |
+|---|---:|
+| Service nodes | 5 |
+| Team nodes | 3 |
+| Incident nodes | 2 |
+| Runbook nodes | 2 |
+| Deployment nodes | 1 |
+| **Total nodes** | **13** |
+| Relationships | **14** |
+
+These are the previously observed counts; the live health endpoint can be used to verify the current database state.
+
+### 6.6 Graph schema summary
+
+```text
+(Service)-[:DEPENDS_ON]->(Service)
+(Service)-[:OWNED_BY]->(Team)
+(Incident)-[:AFFECTED]->(Service)
+(Service)-[:HAS_RUNBOOK]->(Runbook)
+(Deployment)-[:DEPLOYED_TO]->(Service)
+(Deployment)-[:FOLLOWED_BY]->(Incident)
+```
+
+---
+
+## 7. Cypher Queries and Graph Algorithms
+
+The following queries document the graph operations on which the investigation workflow depends. Run them through the FalkorDB browser interface or the project's graph-query layer.
+
+Open `http://127.0.0.1:3000` and select the `traceops` graph.
+
+### 7.1 Inspect graph nodes and relationships
+
+```cypher
+MATCH (a)-[r]->(b)
+RETURN a, r, b
+LIMIT 100
+```
+
+**Purpose:** Inspect the graph topology and understand how operational entities are connected.
+
+### 7.2 Find a service by name
+
+```cypher
+MATCH (s:Service {name: 'Payment API'})
+RETURN s
+```
+
+**Purpose:** Retrieve the service node used to begin an investigation.
+
+### 7.3 Find direct dependencies of a service
+
+```cypher
+MATCH (s:Service {name: 'Checkout'})-[:DEPENDS_ON]->(dependency:Service)
+RETURN s.name AS service,
+       dependency.name AS dependency
+```
+
+**Purpose:** Find the services Checkout directly depends on.
+
+### 7.4 Find services that directly depend on Payment API
+
+```cypher
+MATCH (dependent:Service)-[:DEPENDS_ON]->(target:Service {name: 'Payment API'})
+RETURN dependent.name AS dependent_service,
+       target.name AS dependency
+```
+
+**Purpose:** Identify immediate dependents of Payment API.
+
+Expected sample result:
+
+| Dependent service | Dependency |
+|---|---|
+| Checkout | Payment API |
+
+### 7.5 Discover multi-hop dependency paths
+
+```cypher
+MATCH p = (dependent:Service)-[:DEPENDS_ON*1..5]->(target:Service {name: 'Payment API'})
+RETURN p
+```
+
+**Purpose:** Discover dependency paths of one to five edges leading to Payment API.
+
+Expected sample paths:
+
+```text
+Checkout -> Payment API
+Order Management -> Checkout -> Payment API
+```
+
+The path length represents the number of dependency relationships traversed.
+
+### 7.6 Calculate hop counts
+
+```cypher
+MATCH p = (dependent:Service)-[:DEPENDS_ON*1..5]->(target:Service {name: 'Payment API'})
+RETURN dependent.name AS dependent_service,
+       [node IN nodes(p) | node.name] AS dependency_path,
+       length(p) AS hops
+ORDER BY hops ASC
+```
+
+**Purpose:** Return the path and number of edges in each discovered dependency chain.
+
+Expected sample results:
+
+| Dependent service | Path | Hops |
+|---|---|---:|
+| Checkout | Checkout → Payment API | 1 |
+| Order Management | Order Management → Checkout → Payment API | 2 |
+
+The investigation code should also guard against duplicate paths if the graph contains multiple routes to the same target.
+
+### 7.7 Find the owning team
+
+```cypher
+MATCH (s:Service {name: 'Payment API'})-[:OWNED_BY]->(t:Team)
+RETURN s.name AS service,
+       t.name AS owning_team
+```
+
+**Purpose:** Identify the team associated with the service.
+
+Expected sample owner: Payment Platform.
+
+### 7.8 Retrieve incidents affecting a service
+
+```cypher
+MATCH (i:Incident)-[:AFFECTED]->(s:Service {name: 'Payment API'})
+RETURN i.id AS incident_id,
+       i.title AS title,
+       i.severity AS severity,
+       i.status AS status
+```
+
+**Purpose:** Retrieve incident context linked to Payment API.
+
+Expected sample incident: INC-1045, with high severity and investigating status.
+
+### 7.9 Retrieve runbooks for a service
+
+```cypher
+MATCH (s:Service {name: 'Payment API'})-[:HAS_RUNBOOK]->(r:Runbook)
+RETURN r.id AS runbook_id,
+       r.title AS title,
+       r.instructions AS instructions
+```
+
+**Purpose:** Retrieve troubleshooting guidance associated with the service.
+
+Expected sample runbook: RB-PAY-01.
+
+### 7.10 Inspect deployment-to-service relationships
+
+```cypher
+MATCH (d:Deployment)-[:DEPLOYED_TO]->(s:Service)
+RETURN d.id AS deployment_id,
+       d.version AS version,
+       s.name AS service
+```
+
+**Purpose:** Find which service a recorded deployment targets.
+
+### 7.11 Inspect deployment–incident correlations
+
+```cypher
+MATCH (d:Deployment)-[:FOLLOWED_BY]->(i:Incident)
+RETURN d.id AS deployment_id,
+       i.id AS incident_id,
+       i.title AS incident_title,
+       i.severity AS severity,
+       i.status AS status
+```
+
+**Purpose:** Retrieve incidents connected to deployments in the graph.
+
+**Important:** A recorded `FOLLOWED_BY` relationship does not establish causation. A deployment may precede an incident without causing it.
+
+### 7.12 Traverse the service graph from Auth Service
+
+```cypher
+MATCH p = (dependent:Service)-[:DEPENDS_ON*1..5]->(target:Service {name: 'Auth Service'})
+RETURN [node IN nodes(p) | node.name] AS dependency_path,
+       length(p) AS hops
+ORDER BY hops ASC
+```
+
+**Purpose:** Identify services that depend directly or indirectly on Auth Service.
+
+Expected sample paths include:
+
+```text
+Payment API -> Auth Service
+Checkout -> Payment API -> Auth Service
+Order Management -> Checkout -> Payment API -> Auth Service
+```
+
+### 7.13 Find all runbooks and incidents linked to a service
+
+```cypher
+MATCH (s:Service {name: 'Payment API'})
+OPTIONAL MATCH (i:Incident)-[:AFFECTED]->(s)
+OPTIONAL MATCH (s)-[:HAS_RUNBOOK]->(r:Runbook)
+RETURN s.name AS service,
+       collect(DISTINCT i.id) AS incidents,
+       collect(DISTINCT r.id) AS runbooks
+```
+
+**Purpose:** Combine incident and runbook context for a service into one result. `OPTIONAL MATCH` allows the service to be returned even if one of these relationship types is absent.
+
+### 7.14 Graph operations used by TraceOps AI
+
+The core graph algorithms and operations are:
+
+1. **Service lookup:** Match a requested service by its canonical name.
+2. **Dependency traversal:** Follow directed `DEPENDS_ON` edges.
+3. **Multi-hop path discovery:** Find indirect dependents through intermediate services.
+4. **Hop-count calculation:** Measure the number of relationships in a discovered path.
+5. **Relationship-based retrieval:** Retrieve owners, incidents, runbooks, and deployments.
+6. **Correlation inspection:** Retrieve deployment–incident relationships while preserving the distinction between association and causation.
+
+These operations provide structured evidence for the investigation report. They do not by themselves establish that a service is currently down or identify a definitive root cause.
+
+---
+
+## 8. MCP Integration
+
+### 8.1 What MCP does in TraceOps AI
+
+The Model Context Protocol (MCP) is the tool interface used to expose application capabilities to an AI workflow.
+
+In TraceOps AI, graph investigation operations are represented as tools so that the investigation logic can request structured information about services and their connected operational context.
+
+The intended division of responsibilities is:
+
+- **FalkorDB:** Stores graph entities and relationships.
+- **Cypher queries:** Retrieve and traverse the graph.
+- **MCP server:** Exposes supported investigation operations as tools.
+- **Investigation orchestration:** Coordinates tool use and report generation.
+- **Ollama / Qwen 2.5 3B:** Interprets the retrieved context locally.
+- **Validation logic:** Checks selected claims and detects known unsupported statements.
+- **Frontend:** Presents the report and graph to the user.
+
+MCP is not the graph database, and it does not replace Cypher. It provides a standardized way to expose graph operations as callable tools.
+
+### 8.2 MCP tools
+
+The current TraceOps AI MCP tool set includes the following operations.
+
+| Tool | Purpose | Investigation value |
+|---|---|---|
+| `get_service_details` | Retrieve service details | Establishes the service and its recorded properties |
+| `find_dependencies` | Discover service dependencies | Supports direct and multi-hop impact analysis |
+| `get_service_owner` | Retrieve the owning team | Identifies the team responsible for the service |
+| `get_related_incidents` | Retrieve related incidents | Supplies incident titles, severity, and status |
+| `get_service_runbooks` | Retrieve linked runbooks | Provides relevant troubleshooting guidance |
+| `get_incident_deployment_correlations` | Inspect deployment–incident links | Surfaces recorded correlations without assuming causation |
+
+The tool names describe their intended responsibilities. Exact argument schemas, return fields, and transport configuration should be taken from the current MCP server implementation.
+
+### 8.3 Example investigation using MCP tools
+
+For a request such as:
+
+> Investigate Payment API and identify potential impact, related incidents, owning team, and runbook guidance.
+
+The investigation workflow can use the tools as follows:
+
+1. `get_service_details` retrieves the service record.
+2. `find_dependencies` retrieves dependent services and dependency paths.
+3. `get_service_owner` retrieves the owning team.
+4. `get_related_incidents` retrieves linked incident records.
+5. `get_service_runbooks` retrieves the associated runbook.
+6. `get_incident_deployment_correlations` retrieves recorded deployment–incident relationships when relevant.
+
+
+for example:
+Payment API
+“Investigate Payment API and identify why it is degraded. Find related incidents, recent deployment correlations, service dependencies, owning team, and relevant runbooks.”
+Expected evidence
+- Incident INC-1045 — high severity, investigating.
+- Deployment DEP-208 — version v2.4.1.
+- Owner: Payment Platform.
+- Related runbook: RB-PAY-01.
+
+“Investigate Checkout. Which downstream services does it depend on, which upstream services may be impacted by a Checkout issue, and what incidents or runbooks are relevant?”
+Expected evidence
+- Checkout depends on Payment API.
+- Checkout is owned by Commerce Engineering.
+- Payment API is a related downstream dependency.
+- Check connected incidents and runbooks.
+    Copy prompt
+
+### 8.4 Why MCP is useful
+
+MCP provides a clean boundary between the reasoning workflow and the operations that retrieve data.
+
+It makes the investigation capabilities easier to expose, test, and reuse. Instead of requiring the language model to construct arbitrary database operations, the application can offer defined tools with controlled responsibilities.
+
+This also helps keep operational facts grounded in FalkorDB responses rather than relying exclusively on the LLM's generated text.
+
+### 8.5 MCP and safety
+
+The tools retrieve operational evidence. They should not be treated as proof of facts that the graph does not contain.
+
+For example:
+
+- A dependency path indicates potential impact, not a confirmed outage.
+- An incident relationship indicates recorded association, not necessarily current service health.
+- A deployment–incident correlation does not establish root cause.
+- A runbook recommendation does not mean remediation was executed.
+
+TraceOps AI currently focuses on investigation, not autonomous production remediation.
+
+---
+
+## 9. Local LLM
+
+TraceOps AI uses Ollama with `qwen2.5:3b` for local language-model inference.
+
+The model helps explain evidence retrieved through the graph investigation workflow. FalkorDB remains the source of the structured service relationships and recorded operational entities.
+
+### Why local inference?
+
+- Avoids sending investigation prompts to an external hosted LLM provider in the intended local setup.
+- Supports experimentation on a developer machine.
+- Keeps graph retrieval separate from natural-language interpretation.
+- Allows investigation prompts and outputs to be tested locally.
+
+Local execution still depends on the computer's available memory, CPU, GPU, and configuration. The application should not send graph credentials or unrelated secrets to the model.
+
+---
+
+## 10. Evidence Validation
+
+TraceOps AI includes validation tests for selected classes of investigation claims.
+
+### Dependency direction
+
+The graph uses directed relationships. The system should preserve the correct meaning of a dependency and detect reversed claims.
+
+### Causal claims
+
+A deployment followed by an incident does not automatically prove that the deployment caused it. The validation logic tests whether explicit non-causation statements are incorrectly flagged and whether unsupported positive causal claims are detected.
+
+### Evidence limitations
+
+Reports should distinguish:
+
+- Recorded graph facts.
+- Potential impact inferred from dependency paths.
+- Historical incident context.
+- Deployment–incident correlations.
+- Hypotheses that require additional evidence.
+
+The current validation is a prototype-level safeguard, not a comprehensive guarantee that every LLM statement is correct.
+
+---
+
+## 11. Installation and Setup
+
+### Prerequisites
 
 - Windows 10 or 11
 - Python 3.12
 - Git
 - Node.js and npm
-- Docker Desktop with its Linux container engine running
+- Docker Desktop
 - Ollama
-- Sufficient memory and disk space for the local model
 
-Check the installations in PowerShell:
+Verify the tools:
 
 ```powershell
 python --version
@@ -122,64 +643,38 @@ npm --version
 ollama --version
 ```
 
-If `python` does not select Python 3.12, use the Python launcher:
+### Step 1: Clone or open the repository
 
-```powershell
-py -3.12 --version
-```
-
-## Installation and Setup
-
-### 1. Clone the repository
-
-Replace the placeholder URL with the actual public GitHub repository URL after publishing the project.
+If the project has been published:
 
 ```powershell
 git clone <YOUR_GITHUB_REPOSITORY_URL>
 cd traceops-ai
 ```
 
-If you already have the project locally, navigate to its root directory instead.
+Replace the placeholder with the actual repository URL.
 
-### 2. Start FalkorDB
+If you already have the project, navigate to its root directory instead.
 
-From the project root, run:
+### Step 2: Start FalkorDB
 
 ```powershell
 docker compose up -d
-```
-
-Check the container:
-
-```powershell
 docker compose ps
 ```
 
-The provided Compose configuration exposes:
+The local Compose configuration exposes FalkorDB on `127.0.0.1:6379` and its browser interface on `127.0.0.1:3000`.
 
-- FalkorDB: `127.0.0.1:6379`
-- FalkorDB browser interface: `http://127.0.0.1:3000`
-
-Keep the database running while using the application.
-
-### 3. Create the Python environment
-
-From the project root:
+### Step 3: Set up Python
 
 ```powershell
 py -3.12 -m venv .venv
-```
-
-Install the Python dependencies:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### 4. Configure environment variables
+### Step 4: Configure environment variables
 
-Create a `.env` file in the project root, using the following local defaults if they match your configuration:
+Create `.env` only if needed by the current configuration code. For the local setup, the example configuration is:
 
 ```dotenv
 FALKORDB_HOST=127.0.0.1
@@ -187,84 +682,57 @@ FALKORDB_PORT=6379
 FALKORDB_GRAPH=traceops
 ```
 
-Do not commit passwords, API keys, or other secrets to Git.
+Confirm the expected variable names in the project code before changing configuration. Do not commit `.env` or secrets.
 
-### 5. Verify the FalkorDB connection
-
-Run:
+### Step 5: Test the database connection
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\test_connection.py
 ```
 
-Expected output should indicate that TraceOps AI connected successfully to FalkorDB.
+### Step 6: Seed the sample graph if required
 
-If the connection fails, verify that Docker is running and that the database container is healthy.
+**Warning: the seed script deletes existing graph nodes and relationships before recreating the sample graph.**
 
-### 6. Populate the sample graph
-
-If the database is empty, run the project's graph-seeding script:
+Run it only if you intentionally want to reset the data:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\seed_graph.py
 ```
 
-**Warning:** The current seed script begins by deleting existing graph nodes and relationships. Run it only when you intend to reset and repopulate the graph. Do not run it against data you need to preserve.
+Skip this step if the graph is already populated.
 
-The sample graph includes services, teams, incidents, a deployment, and runbooks.
+### Step 7: Install and start Ollama
 
-### 7. Install and start Ollama
+Install Ollama from its official website: https://ollama.com/
 
-Install Ollama from its official website:
-
-https://ollama.com/
-
-Download the model used by TraceOps AI:
+Download the model:
 
 ```powershell
 ollama pull qwen2.5:3b
-```
-
-Confirm that the model is available:
-
-```powershell
 ollama list
 ```
 
-Check that the local Ollama service is running. On a typical local installation, its API is available at:
-
-`http://localhost:11434`
-
-You can test the model directly:
+Test it if necessary:
 
 ```powershell
 ollama run qwen2.5:3b
 ```
 
-Enter a simple prompt such as:
-
-```text
-Explain why dependency relationships are useful during incident investigation.
-```
-
-Exit the interactive session when finished.
-
-TraceOps AI uses the Ollama chat API and the `qwen2.5:3b` model. Model inference runs locally, although performance depends on the computer's available CPU, memory, and GPU resources.
-
-### 8. Install frontend dependencies
-
-Open a new terminal:
+### Step 8: Install frontend dependencies
 
 ```powershell
 cd frontend
 npm install
 ```
 
-## Running TraceOps AI
+---
 
-Keep the database and Ollama available while running the application.
+## 12. Running the Application
 
-### Terminal 1: Start the backend
+Start FalkorDB and make sure Ollama is available.
+
+### Terminal 1: Backend
 
 From the project root:
 
@@ -272,193 +740,30 @@ From the project root:
 .\.venv\Scripts\python.exe -m app.server
 ```
 
-The Flask backend should be available at:
+The backend should be available at `http://127.0.0.1:5000`.
 
-`http://127.0.0.1:5000`
+Health endpoint: `http://127.0.0.1:5000/api/health`
 
-Check the health endpoint:
-
-```text
-http://127.0.0.1:5000/api/health
-```
-
-### Terminal 2: Start the frontend
+### Terminal 2: Frontend
 
 ```powershell
-cd frontend
+cd C:\Users\win10\Desktop\traceops-ai\frontend
 npm run dev
 ```
 
-Open the Vite URL printed in the terminal, normally:
+Open the Vite URL printed in the terminal, normally `http://localhost:5173`.
 
-`http://localhost:5173`
+---
 
-You should now be able to explore the graph and run an investigation.
-
-
-
-
-## Testing the Application
-
-### Test 1: Investigate Payment API
-
-In the AI Investigator interface, enter:
-
-```text- Input
-Payment API
-```
-##Command to run investigator- Investigate this service and identify potential impact, related incidents, owning team, and recommended runbook steps. Include the exact dependency paths and hop counts. Clearly distinguish potential impact from a confirmed outage, and do not assume a root cause.
-
-Expected evidence includes:
-
-What it should demonstrate
-- Checkout: Checkout → Payment API — 1 hop.
-- Order Management: Order Management → Checkout → Payment API — 2 hops.
-- Owning team: Payment Platform.
-- Related incident: INC-1045.
-- Runbook: RB-PAY-01.
-
-The graph should show the relevant service and its connected evidence. Dependency relationships indicate potential impact; they do not prove that another service is experiencing an outage.
-
-### Test 2: Investigate Auth Service
-
-Enter:
-
-```text-Input
-Auth Service
-```
-
-##Command-Investigate Auth Service and explain which dependent services could be affected if it experiences a problem. Include each exact dependency path and hop count, related incidents and their current recorded status, the owning team, and the recommended runbook steps. Do not treat a historical resolved incident as proof of current service health.
-
-Expected evidence includes:
-
-What it should demonstrate
-- Payment API: Payment API → Auth Service — 1 hop.
-- Checkout: Checkout → Payment API → Auth Service — 2 hops.
-- Order Management: Order Management → Checkout → Payment API → Auth Service — 3 hops.
-- Owning team: Identity Platform.
-- Related incident: INC-1032 (medium, resolved).
-- Runbook: RB-AUTH-01
-
-A resolved historical incident does not establish the current health of a service.
-
-### Test 3: Search for an unknown service
-
-Enter:
-
-```text
-Unknown Service
-```
-
-Expected behavior: the backend should report that the service was not found rather than inventing graph evidence.
-
-### Test 4: Explore the graph
-
-In the interactive graph:
-
-1. Search for `Payment API`.
-2. Select a node to inspect its properties.
-3. Explore its connected nodes and relationships.
-4. Try the node-type filter.
-5. Use zoom and fit controls to navigate the graph.
-
-### Test 5: Check the API directly
-
-The graph endpoint can be opened in a browser:
-
-```text
-http://127.0.0.1:5000/api/graph
-```
-
-It should return graph visualization data containing `nodes` and `edges`.
-
-## Example Cypher Queries
-
-You can run Cypher queries through the FalkorDB browser interface at `http://127.0.0.1:3000`, selecting the `traceops` graph.
-
-The examples below use the sample graph's entity labels and relationship types. If you change the schema, adjust the queries accordingly.
-
-### 1. View all nodes and relationships
-
-```cypher
-MATCH (a)-[r]->(b)
-RETURN a, r, b
-LIMIT 100
-```
-
-### 2. Find Payment API
-
-```cypher
-MATCH (s:Service {name: 'Payment API'})
-RETURN s
-```
-
-### 3. Find services that depend on Payment API
-
-```cypher
-MATCH (s:Service)-[:DEPENDS_ON]->(target:Service {name: 'Payment API'})
-RETURN s.name AS dependent_service, target.name AS dependency
-```
-
-### 4. Find the team responsible for Payment API
-
-```cypher
-MATCH (s:Service {name: 'Payment API'})-[:OWNED_BY]->(t:Team)
-RETURN s.name AS service, t.name AS owning_team
-```
-
-### 5. Find incidents affecting Payment API
-
-```cypher
-MATCH (i:Incident)-[:AFFECTED]->(s:Service {name: 'Payment API'})
-RETURN i.id AS incident_id,
-       i.title AS title,
-       i.severity AS severity,
-       i.status AS status
-```
-
-### 6. Find Payment API's runbooks
-
-```cypher
-MATCH (s:Service {name: 'Payment API'})-[:HAS_RUNBOOK]->(r:Runbook)
-RETURN r.id AS runbook_id,
-       r.title AS title,
-       r.instructions AS instructions
-```
-
-### 7. Explore multi-hop dependency paths
-
-```cypher
-MATCH p = (dependent:Service)-[:DEPENDS_ON*1..5]->(target:Service {name: 'Payment API'})
-RETURN p
-```
-
-This explores dependency paths of one to five relationships leading to Payment API. The direction of the relationship matters.
-
-### 8. Find deployments followed by incidents
-
-```cypher
-MATCH (d:Deployment)-[:FOLLOWED_BY]->(i:Incident)
-RETURN d.id AS deployment_id,
-       i.id AS incident_id,
-       i.title AS incident_title
-```
-
-This query finds recorded graph relationships. It does not prove that a deployment caused an incident.
-
-## API Reference
-
-The Flask application currently exposes the following routes:
+## 13. API Reference
 
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/api/health` | Check backend and graph connectivity |
-| GET | `/api/graph` | Retrieve graph nodes and edges |
+| GET | `/api/graph` | Retrieve graph visualization data |
 | POST | `/api/investigate` | Run a service investigation |
 
-### Example investigation request
-
-The investigation endpoint accepts a JSON body with a service name and a question. For example:
+### Example investigation request in PowerShell
 
 ```powershell
 $body = @{
@@ -473,66 +778,106 @@ Invoke-RestMethod `
     -Body $body
 ```
 
-The response contains investigation information and the generated report. The exact response fields depend on the current backend implementation.
+The exact response schema depends on the current backend implementation.
 
-## Troubleshooting
+---
 
-### FalkorDB connection fails
+## 14. Testing
 
-- Check Docker Desktop.
+Run the complete test suite from the project root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -v
+```
+
+The previously verified result was **10 tests passed**.
+
+The suite covers:
+
+- Service investigation and input validation.
+- Case-insensitive service lookup.
+- Dependency direction and reversal detection.
+- Causal-claim validation.
+- Deployment–incident correlation.
+
+Frontend checks:
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
+The frontend lint and production build previously completed successfully. Re-run them after any code changes.
+
+---
+
+## 15. Troubleshooting
+
+### FalkorDB connection failure
+
+- Ensure Docker Desktop is running.
 - Run `docker compose ps`.
-- Confirm the configured host, port, and graph name.
-- Inspect container logs using `docker compose logs`.
+- Verify the host, port, and graph name.
+- Inspect logs with `docker compose logs`.
 
-### Ollama is unavailable
+### Ollama unavailable
 
-- Confirm Ollama is installed and running.
+- Ensure Ollama is running.
 - Run `ollama list`.
-- Confirm `qwen2.5:3b` is available.
-- Test the model with `ollama run qwen2.5:3b`.
-- Check whether another process is using the configured local API port.
+- Confirm `qwen2.5:3b` is installed.
+- Test with `ollama run qwen2.5:3b`.
 
-### Python dependency errors
-
-Run the installation command again:
+### Python dependencies missing
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### Frontend dependency errors
+### Frontend dependencies missing
 
-From the `frontend` directory:
+From `frontend`:
 
 ```powershell
 npm install
+npm run lint
 npm run build
 ```
 
-### A service is not found
+### Service not found
 
-Verify that the graph has been populated and that the service name matches a node in FalkorDB.
+Check the service name and confirm the graph is populated. Do not reseed a graph containing data you want to preserve.
 
-## Limitations
+---
 
-- The project currently uses a sample operational graph, not a live production monitoring system.
-- Potential impact is inferred from recorded dependency paths; it is not confirmation of a real outage.
-- The language model interprets supplied evidence and should not be treated as the source of operational facts.
-- Root cause is not established unless the available evidence explicitly supports it.
-- The local model's response time depends on available hardware.
-- The current prototype does not execute remediation actions against production services.
+## 16. Limitations
 
-## Future Improvements
+- The current graph contains sample operational data rather than live production telemetry.
+- Dependency paths indicate potential impact, not confirmed outages.
+- Deployment–incident relationships do not establish root cause.
+- The LLM can make mistakes; its explanations must be checked against graph evidence.
+- Validation checks cover selected known failure modes rather than all possible hallucinations.
+- The prototype does not execute production remediation.
+- Local inference performance depends on available hardware.
 
-- Connect live monitoring and incident-management data sources.
-- Add graph-based incident timelines and deployment correlation.
-- Expand automated tests for investigation and dependency queries.
-- Improve report evaluation and evidence traceability.
-- Add authenticated access and role-based permissions for multi-user deployments.
+## 17. Future Improvements
 
-## Graph Hacks
+- Integrate live monitoring and incident-management systems.
+- Add richer graph-based incident timelines.
+- Expand automated tests for MCP tool contracts and report evaluation.
+- Improve evidence traceability for individual report statements.
+- Add authentication and role-based permissions for multi-user deployments.
+- Introduce safe, approval-based remediation workflows.
 
-TraceOps AI is built for the Graph Hacks challenge, with FalkorDB as the primary graph database and a local LLM for evidence interpretation.
+---
 
-The project demonstrates how connected operational data can help an AI assistant investigate service dependencies, retrieve related context, and produce explainable findings.
+## 18. Graph Hacks Summary
 
+**Track:** Track 1 — Agents That Act on Connected Data
+
+TraceOps AI combines FalkorDB graph traversal, MCP-based investigation tools, and local LLM interpretation to help engineers investigate interconnected operational services.
+
+FalkorDB is central to the application because the investigation depends on querying the graph's entities and relationships. MCP exposes the investigation capabilities, while the local model helps explain the evidence returned by those operations.
+
+The project aims to make AI-assisted troubleshooting more transparent by presenting dependency paths, related incidents, ownership, runbooks, and evidence limitations in a single workflow.
+![alt text](<TraceOps AI Investigation Architecture.png>)
