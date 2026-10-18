@@ -2,7 +2,6 @@
 from graph.connection import get_graph
 
 
-
 def find_affected_services(service_name: str) -> list[dict]:
     """Find dependent services and return their dependency paths."""
     graph = get_graph()
@@ -111,18 +110,20 @@ def find_service_runbooks(service_name: str) -> list[dict]:
         for row in result.result_set
     ]
 
-def find_service_by_name(service_name: str) -> str | None:
-    """Return the canonical service name, ignoring letter case."""
+
+def find_service_by_name(service_name: str) -> dict | None:
+    """Return all properties of a service, ignoring letter case."""
     graph = get_graph()
+    service_name = service_name.strip()
 
     result = graph.query(
         """
         MATCH (service:Service)
         WHERE toLower(service.name) = toLower($service_name)
-        RETURN service.name AS name
+        RETURN properties(service) AS details
         LIMIT 1
         """,
-        {"service_name": service_name.strip()},
+        {"service_name": service_name},
     )
 
     if not result.result_set:
@@ -210,3 +211,54 @@ def get_graph_visualization_data() -> dict:
         "nodes": list(nodes.values()),
         "edges": edges,
     }
+
+
+def find_incident_deployment_correlations(
+    service_name: str,
+) -> list[dict]:
+    """Find deployments linked to incidents for a given service."""
+    graph = get_graph()
+    service_name = service_name.strip()
+
+    result = graph.query(
+        """
+        MATCH
+            (deployment:Deployment)-[:FOLLOWED_BY]->
+            (incident:Incident),
+            (deployment)-[:DEPLOYED_TO]->
+            (service:Service)
+        WHERE toLower(service.name) = toLower($service_name)
+        RETURN
+            deployment.id AS deployment_id,
+            deployment.version AS deployment_version,
+            deployment.status AS deployment_status,
+            deployment.description AS deployment_description,
+            incident.id AS incident_id,
+            incident.title AS incident_title,
+            incident.severity AS incident_severity,
+            incident.status AS incident_status,
+            service.name AS service_name,
+            service.status AS service_status
+        ORDER BY deployment.id, incident.id
+        """,
+        {"service_name": service_name},
+    )
+
+    return [
+        {
+            "deployment_id": row[0],
+            "deployment_version": row[1],
+            "deployment_status": row[2],
+            "deployment_description": row[3],
+            "incident_id": row[4],
+            "incident_title": row[5],
+            "incident_severity": row[6],
+            "incident_status": row[7],
+            "service_name": row[8],
+            "service_status": row[9],
+            "relationship": "Deployment FOLLOWED_BY Incident",
+            "causation_confirmed": False,
+        }
+        for row in result.result_set
+    ]
+

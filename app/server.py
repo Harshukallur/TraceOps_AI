@@ -1,8 +1,12 @@
+
+import asyncio
+import json
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from graph.queries import get_graph_visualization_data
-from app.ai_investigator import investigate_with_ai
+from app.mcp_agent import investigate as investigate_with_mcp
 
 app = Flask(__name__)
 
@@ -60,7 +64,7 @@ def graph():
 
 @app.post("/api/investigate")
 def investigate():
-    """Investigate a service using FalkorDB evidence and local AI."""
+    """Investigate a service using MCP tools, FalkorDB, and local Qwen."""
     data = request.get_json(silent=True) or {}
 
     service_name = data.get("service_name")
@@ -76,8 +80,11 @@ def investigate():
             "error": "The question must be a string."
         }), 400
 
+    service_name = service_name.strip()
+
     try:
-        result = investigate_with_ai(service_name.strip())
+        # The MCP agent collects evidence and generates the report.
+        result = asyncio.run(investigate_with_mcp(service_name))
 
         if question.strip():
             result["investigation_question"] = question.strip()
@@ -85,12 +92,12 @@ def investigate():
         return jsonify(result), 200
 
     except Exception:
-        app.logger.exception("Service investigation failed")
+        app.logger.exception("MCP service investigation failed")
 
         return jsonify({
             "error": (
                 "The investigation failed. Check the Flask terminal "
-                "for details about FalkorDB or local AI."
+                "for details about MCP, FalkorDB, or local Qwen."
             )
         }), 500
 

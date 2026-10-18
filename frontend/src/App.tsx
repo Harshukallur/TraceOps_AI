@@ -35,7 +35,9 @@ type InvestigationEvidence = {
 type InvestigationResult = {
   evidence?: InvestigationEvidence;
   ai_analysis?: string;
+  report?: string;
   error?: string;
+  validation_warnings?: string[];
 };
 
 type Page = "investigator" | "topology" | "results";
@@ -110,7 +112,6 @@ function getInvestigationGraph(
     }
   }
 
-  // Find services that depend on the target service.
   // For A DEPENDS_ON B, failure of B may affect A.
   let frontier = new Set<string>([target.id]);
   const visitedServices = new Set<string>([target.id]);
@@ -156,8 +157,7 @@ function getInvestigationGraph(
       selected.has(edge.target),
   );
 
-  // Avoid showing isolated entities that have no connecting evidence
-  // in the displayed subgraph.
+  // Avoid showing isolated entities with no connecting relationship.
   const connectedIds = new Set<string>([target.id]);
 
   for (const edge of relevantEdges) {
@@ -219,7 +219,8 @@ async function readApiResponse<T>(response: Response): Promise<T> {
 
 function App() {
   const [page, setPage] = useState<Page>("investigator");
-  const [selectedService, setSelectedService] = useState("Payment API");
+  const [selectedService, setSelectedService] =
+    useState("Payment API");
   const [question, setQuestion] = useState("");
 
   const [graphData, setGraphData] = useState<GraphData>({
@@ -227,14 +228,17 @@ function App() {
     edges: [],
   });
 
-  const [backendStatus, setBackendStatus] = useState("Connecting...");
+  const [backendStatus, setBackendStatus] =
+    useState("Connecting...");
   const [graphError, setGraphError] = useState("");
   const [lastUpdated, setLastUpdated] = useState("");
 
   const [investigating, setInvestigating] = useState(false);
   const [investigationError, setInvestigationError] = useState("");
+
   const [investigationResult, setInvestigationResult] =
     useState<InvestigationResult | null>(null);
+
   const [reportService, setReportService] = useState("Payment API");
 
   useEffect(() => {
@@ -245,8 +249,13 @@ function App() {
         const response = await fetch(`${API_BASE}/api/graph`);
         const data = await readApiResponse<GraphData>(response);
 
-        if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
-          throw new Error("The graph API returned an unexpected response.");
+        if (
+          !Array.isArray(data.nodes) ||
+          !Array.isArray(data.edges)
+        ) {
+          throw new Error(
+            "The graph API returned an unexpected response.",
+          );
         }
 
         if (active) {
@@ -281,16 +290,17 @@ function App() {
   const activeIncidents = graphData.nodes.filter(
     (node) =>
       node.type.toLowerCase() === "incident" &&
-      String(node.properties.status ?? "").toLowerCase() !== "resolved",
+      String(node.properties.status ?? "").toLowerCase() !==
+        "resolved",
   ).length;
 
   const degradedServices = services.filter(
     (node) =>
-      String(node.properties.status ?? "").toLowerCase() === "degraded",
+      String(node.properties.status ?? "").toLowerCase() ===
+      "degraded",
   ).length;
 
-  // Investigation Results gets a focused evidence subgraph.
-  // The Service Topology page continues to use the complete graph.
+  // Results use a focused graph; topology uses the complete graph.
   const investigationGraph = useMemo(
     () =>
       getInvestigationGraph(
@@ -303,10 +313,14 @@ function App() {
   );
 
   async function handleInvestigation() {
-    if (investigating) return;
+    if (investigating) {
+      return;
+    }
 
     if (!selectedService.trim()) {
-      setInvestigationError("Please select a service to investigate.");
+      setInvestigationError(
+        "Please select a service to investigate.",
+      );
       return;
     }
 
@@ -315,27 +329,46 @@ function App() {
     setInvestigationResult(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/investigate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        `${API_BASE}/api/investigate`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            service_name: selectedService,
+            question: question.trim(),
+          }),
         },
-        body: JSON.stringify({
-          service_name: selectedService,
-          question: question.trim(),
-        }),
-      });
+      );
 
-      const data = await readApiResponse<InvestigationResult>(response);
+      const data =
+        await readApiResponse<InvestigationResult>(response);
 
-      if (!data.ai_analysis && !data.evidence) {
+      // The backend may return either ai_analysis or report.
+      const analysis = data.ai_analysis ?? data.report;
+
+      if (!analysis && !data.evidence) {
         throw new Error(
           "The backend returned no report or evidence. Check the investigation endpoint.",
         );
       }
 
+      // Normalize the report field for the existing UI renderer.
+      // The spread preserves validation_warnings and other backend fields.
       setReportService(selectedService);
-      setInvestigationResult(data);
+      setInvestigationResult({
+        ...data,
+        ai_analysis: analysis,
+        validation_warnings: Array.isArray(data.validation_warnings)
+          ? data.validation_warnings.filter(
+              (warning): warning is string =>
+                typeof warning === "string",
+            )
+          : [],
+      });
+
       setPage("results");
     } catch (error) {
       setInvestigationError(
@@ -355,8 +388,9 @@ function App() {
           <div className="welcome-symbol">✳</div>
           <h3>No investigation results yet</h3>
           <p>
-            Run an investigation from the AI Investigator page. Your AI
-            analysis and focused graph evidence will appear here.
+            Run an investigation from the AI Investigator page.
+            Your AI analysis and focused graph evidence will appear
+            here.
           </p>
           <button
             className="primary-button"
@@ -368,6 +402,8 @@ function App() {
         </div>
       );
     }
+
+    const warnings = investigationResult.validation_warnings ?? [];
 
     return (
       <article className="panel report-panel">
@@ -384,43 +420,74 @@ function App() {
             <h4>AI analysis</h4>
             <div className="report-text">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {normalizeModelMarkdown(investigationResult.ai_analysis)}
+                {normalizeModelMarkdown(
+                  investigationResult.ai_analysis,
+                )}
               </ReactMarkdown>
             </div>
+          </section>
+        )}
+
+        {warnings.length > 0 && (
+          <section
+            className="report-section validation-warning"
+            aria-labelledby="validation-warnings-title"
+            role="alert"
+          >
+            <h4 id="validation-warnings-title">
+              Validation warnings ({warnings.length})
+            </h4>
+
+            <p className="panel-note">
+              The report contains claims that may contradict
+              retrieved evidence or need verification. Review these
+              warnings before relying on the affected statements.
+            </p>
+
+            <ul>
+              {warnings.map((warning, index) => (
+                <li key={`${index}-${warning}`}>{warning}</li>
+              ))}
+            </ul>
           </section>
         )}
 
         <section className="report-section">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">FALKORDB · LIVE GRAPH DATA</p>
+              <p className="eyebrow">
+                FALKORDB · LIVE GRAPH DATA
+              </p>
               <h4>Investigation evidence graph</h4>
             </div>
+
             <span className="tag">
               {investigationGraph.nodes.length} NODES
             </span>
           </div>
 
           <p className="panel-note">
-            This focused graph shows the target service, evidence-linked
-            entities, and dependent services within two hops. Unrelated
-            graph entities are excluded. Click a node to inspect its
-            properties and explore its immediate connections.
+            This focused graph shows the target service,
+            evidence-linked entities, and dependent services within
+            two hops. Unrelated graph entities are excluded. Click
+            a node to inspect its properties and explore its
+            immediate connections.
           </p>
 
           {backendStatus !== "Connected" ? (
             <div className="empty-state">
               <h3>Graph data unavailable</h3>
               <p>
-                {graphError || "Waiting for the FalkorDB graph API."}
+                {graphError ||
+                  "Waiting for the FalkorDB graph API."}
               </p>
             </div>
           ) : investigationGraph.nodes.length === 0 ? (
             <div className="empty-state">
               <h3>No connected evidence found</h3>
               <p>
-                No matching service was found in the graph. Check the
-                selected service name and graph data.
+                No matching service was found in the graph. Check
+                the selected service name and graph data.
               </p>
             </div>
           ) : (
@@ -429,10 +496,12 @@ function App() {
                 nodes={investigationGraph.nodes}
                 edges={investigationGraph.edges}
               />
+
               <p className="panel-note">
                 {investigationGraph.nodes.length} relevant nodes ·{" "}
-                {investigationGraph.edges.length} relationships · Graph
-                data last refreshed {lastUpdated || "recently"}.
+                {investigationGraph.edges.length} relationships ·
+                Graph data last refreshed{" "}
+                {lastUpdated || "recently"}.
               </p>
             </>
           )}
@@ -446,6 +515,7 @@ function App() {
           >
             New investigation
           </button>
+
           <button
             className="secondary-button"
             type="button"
@@ -465,6 +535,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">T</div>
+
           <div>
             <h2>
               TraceOps <span>AI</span>
@@ -476,7 +547,9 @@ function App() {
         <p className="nav-label">WORKSPACE</p>
 
         <button
-          className={`nav-item ${page === "investigator" ? "active" : ""}`}
+          className={`nav-item ${
+            page === "investigator" ? "active" : ""
+          }`}
           type="button"
           onClick={() => setPage("investigator")}
         >
@@ -484,7 +557,9 @@ function App() {
         </button>
 
         <button
-          className={`nav-item ${page === "topology" ? "active" : ""}`}
+          className={`nav-item ${
+            page === "topology" ? "active" : ""
+          }`}
           type="button"
           onClick={() => setPage("topology")}
         >
@@ -492,7 +567,9 @@ function App() {
         </button>
 
         <button
-          className={`nav-item ${page === "results" ? "active" : ""}`}
+          className={`nav-item ${
+            page === "results" ? "active" : ""
+          }`}
           type="button"
           onClick={() => setPage("results")}
         >
@@ -511,6 +588,7 @@ function App() {
                     : "#f5bb59",
             }}
           />
+
           <div>
             <strong>Graph database</strong>
             <p>
@@ -529,7 +607,9 @@ function App() {
           <div>
             <p className="eyebrow">{currentPage.eyebrow}</p>
             <h1>{currentPage.title}</h1>
-            <p className="page-description">{currentPage.description}</p>
+            <p className="page-description">
+              {currentPage.description}
+            </p>
           </div>
 
           <div className="model-badge">
@@ -542,18 +622,23 @@ function App() {
           <>
             <section className="welcome">
               <div>
-                <p className="eyebrow">GRAPH-POWERED INTELLIGENCE</p>
+                <p className="eyebrow">
+                  GRAPH-POWERED INTELLIGENCE
+                </p>
+
                 <h2>
                   Understand the impact.
                   <br />
                   Resolve with confidence.
                 </h2>
+
                 <p>
-                  Investigate service failures, discover dependency impact,
-                  identify responsible teams, and get evidence-based
-                  recommendations from your local AI.
+                  Investigate service failures, discover dependency
+                  impact, identify responsible teams, and get
+                  evidence-based recommendations from your local AI.
                 </p>
               </div>
+
               <div className="welcome-symbol">✳</div>
             </section>
 
@@ -561,7 +646,9 @@ function App() {
               <article className="metric-card">
                 <p>GRAPH NODES</p>
                 <h3>
-                  {backendStatus === "Connected" ? graphData.nodes.length : "—"}
+                  {backendStatus === "Connected"
+                    ? graphData.nodes.length
+                    : "—"}
                 </h3>
                 <span>Live entities from FalkorDB</span>
               </article>
@@ -569,7 +656,9 @@ function App() {
               <article className="metric-card">
                 <p>RELATIONSHIPS</p>
                 <h3>
-                  {backendStatus === "Connected" ? graphData.edges.length : "—"}
+                  {backendStatus === "Connected"
+                    ? graphData.edges.length
+                    : "—"}
                 </h3>
                 <span>Live graph connections</span>
               </article>
@@ -577,11 +666,16 @@ function App() {
               <article className="metric-card">
                 <p>ACTIVE INCIDENTS</p>
                 <h3>
-                  {backendStatus === "Connected" ? activeIncidents : "—"}
+                  {backendStatus === "Connected"
+                    ? activeIncidents
+                    : "—"}
                 </h3>
+
                 <span>
                   {backendStatus === "Connected"
-                    ? `${degradedServices} degraded service${degradedServices === 1 ? "" : "s"}`
+                    ? `${degradedServices} degraded service${
+                        degradedServices === 1 ? "" : "s"
+                      }`
                     : "Waiting for graph data"}
                 </span>
               </article>
@@ -599,6 +693,7 @@ function App() {
                   <p className="eyebrow">AI INVESTIGATOR</p>
                   <h3>Investigate a service</h3>
                 </div>
+
                 <span className="ai-icon">✳</span>
               </div>
 
@@ -609,15 +704,22 @@ function App() {
               )}
 
               <label htmlFor="service">Target service</label>
+
               <select
                 id="service"
                 value={selectedService}
-                onChange={(event) => setSelectedService(event.target.value)}
-                disabled={backendStatus !== "Connected" || services.length === 0}
+                onChange={(event) =>
+                  setSelectedService(event.target.value)
+                }
+                disabled={
+                  backendStatus !== "Connected" ||
+                  services.length === 0
+                }
               >
                 {services.length === 0 && (
                   <option value="Payment API">Payment API</option>
                 )}
+
                 {services.map((service) => (
                   <option key={service.id} value={service.label}>
                     {service.label}
@@ -628,10 +730,13 @@ function App() {
               <label htmlFor="question">
                 What do you want to investigate?
               </label>
+
               <textarea
                 id="question"
                 value={question}
-                onChange={(event) => setQuestion(event.target.value)}
+                onChange={(event) =>
+                  setQuestion(event.target.value)
+                }
                 placeholder="e.g. Why could payment failures affect checkout, and which team should investigate?"
               />
 
@@ -662,7 +767,10 @@ function App() {
                 <div role="alert" className="error-message">
                   <strong>Investigation failed</strong>
                   <p>{investigationError}</p>
-                  <p>Check that Flask implements POST /api/investigate.</p>
+                  <p>
+                    Check that Flask implements POST
+                    /api/investigate.
+                  </p>
                 </div>
               )}
             </section>
@@ -676,6 +784,7 @@ function App() {
                 <p className="eyebrow">CONNECTED DATA</p>
                 <h3>Interactive service graph</h3>
               </div>
+
               <span className="tag">
                 {backendStatus === "Connected"
                   ? "LIVE GRAPH DATA"
@@ -692,7 +801,9 @@ function App() {
             {backendStatus !== "Connected" ? (
               <div className="empty-state">
                 <h3>Waiting for FalkorDB data…</h3>
-                <p>Ensure Flask is running at 127.0.0.1:5000.</p>
+                <p>
+                  Ensure Flask is running at 127.0.0.1:5000.
+                </p>
               </div>
             ) : graphData.nodes.length === 0 ? (
               <div className="empty-state">
@@ -701,7 +812,10 @@ function App() {
               </div>
             ) : (
               <>
-                <GraphView nodes={graphData.nodes} edges={graphData.edges} />
+                <GraphView
+                  nodes={graphData.nodes}
+                  edges={graphData.edges}
+                />
 
                 <div className="graph-legend">
                   {[
@@ -719,26 +833,34 @@ function App() {
                 </div>
 
                 <p className="panel-note">
-                  {graphData.nodes.length} nodes · {graphData.edges.length}{" "}
-                  relationships · Updated {lastUpdated || "recently"}.
-                  Drag nodes to explore and zoom to inspect connections.
+                  {graphData.nodes.length} nodes ·{" "}
+                  {graphData.edges.length} relationships · Updated{" "}
+                  {lastUpdated || "recently"}. Drag nodes to explore
+                  and zoom to inspect connections.
                 </p>
 
                 <div className="topology-actions">
                   <label htmlFor="topology-service">
                     Investigate a service
                   </label>
+
                   <select
                     id="topology-service"
                     value={selectedService}
-                    onChange={(event) => setSelectedService(event.target.value)}
+                    onChange={(event) =>
+                      setSelectedService(event.target.value)
+                    }
                   >
                     {services.map((service) => (
-                      <option key={service.id} value={service.label}>
+                      <option
+                        key={service.id}
+                        value={service.label}
+                      >
                         {service.label}
                       </option>
                     ))}
                   </select>
+
                   <button
                     className="primary-button"
                     type="button"
